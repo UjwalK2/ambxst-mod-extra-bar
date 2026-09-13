@@ -1,0 +1,782 @@
+diff --git a/modules/bar/BarContent.qml b/modules/bar/BarContent.qml
+index b9e57ca..579dd96 100644
+--- a/modules/bar/BarContent.qml
++++ b/modules/bar/BarContent.qml
+@@ -527,6 +527,13 @@ Item {
+                             startRadius: root.innerRadius
+                             endRadius: root.innerRadius
+                         }
++                        Bar.WifiIndicator {
++                            id: wifiIndicator
++                            bar: root
++                            layerEnabled: root.shadowsEnabled
++                            startRadius: root.innerRadius
++                            endRadius: root.innerRadius
++                        }
+ 
+                         Bar.BatteryIndicator {
+                             id: batteryIndicator
+@@ -536,6 +543,14 @@ Item {
+                             endRadius: root.innerRadius
+                         }
+ 
++                        Bar.RamIndicator {
++                            id: ramIndicator
++                            bar: root
++                            layerEnabled: root.shadowsEnabled
++                            startRadius: root.innerRadius
++                            endRadius: root.innerRadius
++                        }
++
+                         Clock {
+                             id: clockComponent
+                             bar: root
+diff --git a/modules/bar/BatteryIndicator.qml b/modules/bar/BatteryIndicator.qml
+index c3fcb22..a36122a 100644
+--- a/modules/bar/BatteryIndicator.qml
++++ b/modules/bar/BatteryIndicator.qml
+@@ -30,9 +30,11 @@ Item {
+ 
+         const pct = Battery.percentage;
+         if (pct <= 15)
+-            return Colors.red;
+-        if (pct >= 85)
+-            return Colors.green;
++            return "#F24848";
++        if (pct<=45)
++            return "#F26118"
++        if (pct >= 45)
++            return "#30F291";
+ 
+         // Linear interpolation between red (15%) and green (85%)
+         const ratio = (pct - 15) / (85 - 15);
+diff --git a/modules/bar/RamIndicator.qml b/modules/bar/RamIndicator.qml
+new file mode 100644
+index 0000000..b506269
+--- /dev/null
++++ b/modules/bar/RamIndicator.qml
+@@ -0,0 +1,210 @@
++pragma ComponentBehavior: Bound
++import QtQuick
++import QtQuick.Layouts
++import qs.modules.services
++import qs.modules.components
++import qs.modules.theme
++import qs.modules.globals
++import qs.config
++
++Item {
++    id: root
++
++    required property var bar
++
++    property bool vertical: bar.orientation === "vertical"
++    property bool isHovered: false
++    property bool layerEnabled: true
++
++    property real radius: 0
++    property real startRadius: radius
++    property real endRadius: radius
++
++    // Register/unregister interest in polling while this widget exists on screen
++    Component.onCompleted: SystemResources.activeBarWidgets++
++    Component.onDestruction: SystemResources.activeBarWidgets--
++
++    // Color: green when free, red when under pressure
++    function getUsageColor(pct) {
++        if (pct >= 80)
++            return "#F24848";
++        if (pct>=45)
++            return "#F26118"
++        if (pct <= 45)
++            return "#30F291";
++
++        // Linear interpolation between green (50%) and red (90%)
++        const ratio = (pct - 50) / (90 - 50);
++        return Qt.rgba(Colors.green.r + (Colors.red.r - Colors.green.r) * ratio, Colors.green.g + (Colors.red.g - Colors.green.g) * ratio, Colors.green.b + (Colors.red.b - Colors.green.b) * ratio, 1);
++    }
++
++    function formatGb(mb) {
++        return (mb / 1024).toFixed(1) + " GB";
++    }
++
++    // Reusable ring meter (used once for CPU, once for RAM)
++    component RingMeter: Item {
++        id: ring
++
++        required property real value // 0-100
++        required property string iconText
++
++        width: 32
++        height: 32
++
++        property real angle: (value / 100) * (360 - 2 * gapAngle)
++        readonly property real radiusPx: 12
++        readonly property real lineWidth: 3
++        readonly property real gapAngle: 45
++        readonly property color ringColor: root.getUsageColor(value)
++
++        // How long the ring's animated transition takes.
++        readonly property int animMs: 4000
++
++        // Only animate if polling is slow enough for the animation to
++        // actually finish before the next value arrives. If polling is
++        // faster than the animation duration (e.g. a 250ms update interval
++        // with a 400ms animation), a new animation restarts before the old
++        // one settles - so it NEVER stops running, meaning the Canvas keeps
++        // requesting repaints forever and the compositor never gets to
++        // render an idle frame. That constant repainting is what was
++        // keeping the dGPU awake. Below that threshold we just jump
++        // straight to the new value instead of animating.
++        readonly property bool canAnimate: Config.animDuration > 0 && SystemResources.updateInterval > ring.animMs * 1.5
++
++        Canvas {
++            id: canvas
++            anchors.fill: parent
++            antialiasing: true
++
++            // Ignore sub-visual-threshold angle changes so tiny float
++            // jitter doesn't trigger a repaint (and therefore a GPU frame)
++            // for a change nobody would actually see.
++            property real lastPaintedAngle: -1000
++
++            onPaint: {
++                let ctx = getContext("2d");
++                ctx.reset();
++
++                let centerX = width / 2;
++                let centerY = height / 2;
++                let radius = ring.radiusPx;
++                let lineWidth = ring.lineWidth;
++
++                ctx.lineCap = "round";
++
++                let baseStartAngle = (Math.PI / 2) + (ring.gapAngle * Math.PI / 180);
++                let progressAngleRad = ring.angle * Math.PI / 180;
++                let totalAngleRad = (360 - 2 * ring.gapAngle) * Math.PI / 180;
++
++                ctx.strokeStyle = Colors.outlineVariant;
++                ctx.lineWidth = lineWidth;
++                ctx.beginPath();
++                ctx.arc(centerX, centerY, radius, baseStartAngle + progressAngleRad, baseStartAngle + totalAngleRad, false);
++                ctx.stroke();
++
++                if (ring.angle > 0) {
++                    ctx.strokeStyle = ring.ringColor;
++                    ctx.lineWidth = lineWidth;
++                    ctx.beginPath();
++                    ctx.arc(centerX, centerY, radius, baseStartAngle, baseStartAngle + progressAngleRad, false);
++                    ctx.stroke();
++                }
++            }
++
++            Connections {
++                target: ring
++                function onAngleChanged() {
++                    if (Math.abs(canvas.lastPaintedAngle - ring.angle) < 0.3)
++                        return;
++                    canvas.lastPaintedAngle = ring.angle;
++                    canvas.requestPaint();
++                }
++            }
++        }
++
++        Text {
++            anchors.centerIn: parent
++            text: ring.iconText
++            font.family: Icons.font
++            font.pixelSize: 12
++            color: Colors.overBackground
++        }
++
++        Behavior on angle {
++            enabled: ring.canAnimate
++            NumberAnimation {
++                duration: ring.animMs
++                easing.type: Easing.OutCubic
++            }
++        }
++    }
++
++    Layout.preferredWidth: root.vertical ? 36 : 64
++    Layout.preferredHeight: root.vertical ? 64 : 36
++    Layout.fillWidth: vertical
++    Layout.fillHeight: !vertical
++
++    HoverHandler {
++        onHoveredChanged: root.isHovered = hovered
++    }
++
++    StyledRect {
++        id: buttonBg
++        variant: "bg"
++        anchors.fill: parent
++        enableShadow: root.layerEnabled
++
++        topLeftRadius: root.vertical ? root.startRadius : root.startRadius
++        topRightRadius: root.vertical ? root.startRadius : root.endRadius
++        bottomLeftRadius: root.vertical ? root.endRadius : root.startRadius
++        bottomRightRadius: root.vertical ? root.endRadius : root.endRadius
++
++        // Background highlight on hover
++        Rectangle {
++            anchors.fill: parent
++            color: Styling.srItem("overprimary")
++            opacity: root.isHovered ? 0.25 : 0
++            radius: parent.radius ?? 0
++
++            Behavior on opacity {
++                enabled: Config.animDuration > 0
++                NumberAnimation {
++                    duration: Config.animDuration / 2
++                }
++            }
++        }
++
++        // CPU ring + RAM ring, laid out in a row (horizontal bar) or column (vertical bar)
++        GridLayout {
++            anchors.centerIn: parent
++            columns: root.vertical ? 1 : 2
++            rows: root.vertical ? 2 : 1
++            rowSpacing: 4
++            columnSpacing: 4
++
++            RingMeter {
++                Layout.alignment: Qt.AlignCenter
++                value: SystemResources.cpuUsage
++                iconText: Icons.cpu ?? "\uf2db" // fall back to a chip glyph if Icons.cpu isn't defined
++            }
++
++            RingMeter {
++                Layout.alignment: Qt.AlignCenter
++                value: SystemResources.ramUsage
++                iconText: Icons.ram ?? "\uf85a" // fall back to a memory-chip glyph if Icons.ram isn't defined
++            }
++        }
++
++        MouseArea {
++            anchors.fill: parent
++            hoverEnabled: true
++            cursorShape: Qt.PointingHandCursor
++        }
++
++        StyledToolTip {
++            visible: root.isHovered
++            tooltipText: "CPU: " + Math.round(SystemResources.cpuUsage) + "%" + "  •  " + "RAM: " + Math.round(SystemResources.ramUsage) + "%" + (SystemResources.ramTotal > 0 ? (" (" + root.formatGb(SystemResources.ramUsed) + " / " + root.formatGb(SystemResources.ramTotal) + ")") : "")
++        }
++    }
++}
+diff --git a/modules/bar/TemperatureIndicator.qml b/modules/bar/TemperatureIndicator.qml
+new file mode 100644
+index 0000000..a0cc201
+--- /dev/null
++++ b/modules/bar/TemperatureIndicator.qml
+@@ -0,0 +1,289 @@
++pragma ComponentBehavior: Bound
++import QtQuick
++import QtQuick.Layouts
++import qs.modules.services
++import qs.modules.components
++import qs.modules.theme
++import qs.modules.globals
++import qs.config
++
++// ============================================================================
++// TemperatureIndicator
++// ----------------------------------------------------------------------------
++// A "thermometer style" temperature gauge for the bar, sibling to
++// RamIndicator.qml's CPU/RAM ring meters.
++//
++// Design note: unlike the CPU/RAM rings, the gauge itself is ALWAYS drawn as
++// a vertical capsule that fills from the bottom up — a thermometer reads
++// naturally that way regardless of whether the *bar* it lives in is
++// horizontal or vertical. Only the widget's outer background sizing reacts
++// to bar.orientation (same as RamIndicator); the fill bar shape never
++// rotates.
++//
++// USAGE:
++//   TemperatureIndicator {
++//       bar: root.bar                       // required, same as RamIndicator
++//   }
++//
++//   // Reuse for a GPU sensor instead of CPU by overriding `value` + `label`:
++//   TemperatureIndicator {
++//       bar: root.bar
++//       value: SystemResources.gpuTemp
++//       label: "GPU"
++//       warnTemp: 75
++//       critTemp: 90
++//   }
++//
++// ----------------------------------------------------------------------------
++// CONFIGURABLE PROPERTIES (all overridable from wherever you instantiate this)
++// ----------------------------------------------------------------------------
++//   value            Current temperature in °C. Defaults to
++//                     SystemResources.cpuTemp. Point it at
++//                     SystemResources.gpuTemp / gpuTemps[n] / anything else
++//                     numeric to repurpose this same component.
++//
++//   label            Short name shown in the hover tooltip, e.g. "CPU",
++//                     "GPU 0". Purely cosmetic, does not affect the reading.
++//
++//   unit             Suffix appended after the rounded number in both the
++//                     inline text and the tooltip. Default "°C".
++//
++//   showValueText    Set false to hide the small numeric readout under the
++//                     bar (e.g. if you only want the bar + tooltip).
++//
++//   showIcon         Set false to hide the small glyph above the bar.
++//
++//   iconText         Icon-font glyph drawn above the bar. Falls back to a
++//                     generic thermometer glyph if Icons.temp isn't defined
++//                     in your icon set — replace that fallback codepoint if
++//                     your font maps it to something else.
++//
++//   minTemp/maxTemp  Range used ONLY to normalize how full the bar looks
++//                     (0% fill at minTemp, 100% fill at maxTemp). They do
++//                     NOT clamp the displayed number — a reading outside the
++//                     range just pins the bar visually at empty/full while
++//                     the text still shows the real value.
++//
++//   warnTemp         Temperature at/above which the bar + icon turn orange.
++//   critTemp         Temperature at/above which the bar + icon turn red.
++//                     Below warnTemp everything stays green. (Same 3-stop
++//                     color scheme as RamIndicator's getUsageColor.)
++//
++//   barWidth         Pixel width of the fill track (the capsule's diameter).
++//   barHeight        Pixel height of the fill track (the capsule's length).
++// ============================================================================
++
++Item {
++    id: root
++
++    required property var bar
++
++    // --- layout / chrome: mirrors RamIndicator so both widgets match visually ---
++    property bool vertical: bar.orientation === "vertical"
++    property bool isHovered: false
++    property bool layerEnabled: true
++
++    property real radius: 0
++    property real startRadius: radius
++    property real endRadius: radius
++
++    // --- CONFIGURABLE: data source ---
++    // Swap this binding to reuse the component for a different sensor
++    // (e.g. `value: SystemResources.gpuTemp`).
++    property real value: SystemResources.cpuTemp
++
++    // --- CONFIGURABLE: text / labelling ---
++    property string label: "CPU"                       // tooltip name, e.g. "CPU: 62°C"
++    property string unit: "\u00B0C"                     // "°C" — suffix on the readout
++    property bool showValueText: true                   // numeric text under the bar ("62°C")
++    property bool showIcon: true                         // small thermometer glyph above the bar
++    property string iconText: Icons.temperature           // thermometer glyph from the icon font
++
++    // --- CONFIGURABLE: gauge range + color thresholds (all in °C) ---
++    property real minTemp: 20    // bar looks empty at/below this
++    property real maxTemp: 100   // bar looks full at/above this
++    property real warnTemp: 70   // >= this -> orange
++    property real critTemp: 85   // >= this -> red
++
++    // --- CONFIGURABLE: pixel size of the fill track itself ---
++    property real barWidth: 8
++    property real barHeight: 30
++
++    // Register/unregister interest in polling while this widget exists on
++    // screen — identical ref-counting mechanism to RamIndicator, so having
++    // both widgets on the bar simultaneously just increments the same counter
++    // twice and decrements it twice; SystemResources only needs the count to
++    // be >0 to keep polling.
++    Component.onCompleted: SystemResources.activeBarWidgets++
++    Component.onDestruction: SystemResources.activeBarWidgets--
++
++    // Normalized 0-1 fill amount, derived from value/minTemp/maxTemp.
++    // A sensor reading of -1 (i.e. "no reading available", per
++    // SystemResources' cpuTemp/gpuTemp convention) is treated as empty
++    // rather than letting the math produce a negative/garbage percentage.
++    readonly property real percent: {
++        if (root.value < 0)
++            return 0;
++        const raw = (root.value - root.minTemp) / (root.maxTemp - root.minTemp);
++        return Math.max(0, Math.min(1, raw));
++    }
++
++    // Same 3-stop color ramp style as RamIndicator.getUsageColor, but keyed
++    // off the configurable warnTemp/critTemp thresholds instead of fixed
++    // percentages, since "hot" means something different per sensor.
++    function getTempColor(temp) {
++        if (temp < 0)
++            return Colors.outlineVariant; // sensor unavailable — neutral gray
++        if (temp >= root.critTemp)
++            return "#F24848"; // red
++        if (temp >= root.warnTemp)
++            return "#F26118"; // orange
++        return "#30F291";     // green
++    }
++
++    // Formats the raw °C value for both the inline text and the tooltip.
++    // Shows "--" when no sensor reading is available.
++    function formatTemp(temp) {
++        return temp < 0 ? "--" : Math.round(temp) + root.unit;
++    }
++
++    // Reusable vertical fill bar ("thermometer capsule"). Kept as its own
++    // sub-component (same pattern as RamIndicator's RingMeter) in case this
++    // file grows to show multiple sensors side by side later.
++    component ThermoBar: Item {
++        id: thermo
++
++        required property real percent   // 0-1, how full the bar should look
++        required property color barColor
++        required property real trackWidth
++        required property real trackHeight
++
++        width: trackWidth
++        height: trackHeight
++
++        // How long the fill's animated transition takes.
++        readonly property int animMs: 4000
++
++        // Same reasoning as RingMeter.canAnimate in RamIndicator: only
++        // animate if polling is slow enough for the animation to finish
++        // before the next value arrives, otherwise the Behavior never
++        // settles and keeps forcing repaints/compositor frames forever.
++        readonly property bool canAnimate: Config.animDuration > 0 && SystemResources.updateInterval > thermo.animMs * 1.5
++
++        // Background capsule (the empty "track" the fill sits inside).
++        Rectangle {
++            id: track
++            anchors.fill: parent
++            radius: Styling.radius(-1)
++            color: Colors.outlineVariant
++            opacity: 0.4
++        }
++
++        // Fill capsule — anchored to the bottom so it grows upward as
++        // percent increases, like mercury rising in a thermometer.
++        Rectangle {
++            id: fill
++            width: parent.width
++            radius: Styling.radius(-2)
++            color: thermo.barColor
++            height: parent.height * thermo.percent
++            anchors.bottom: parent.bottom
++
++            Behavior on height {
++                enabled: thermo.canAnimate
++                NumberAnimation {
++                    duration: thermo.animMs
++                    easing.type: Easing.OutCubic
++                }
++            }
++
++            // Smooth color transitions when crossing warnTemp/critTemp
++            // instead of an abrupt color snap.
++            Behavior on color {
++                enabled: Config.animDuration > 0
++                ColorAnimation {
++                    duration: Config.animDuration
++                }
++            }
++        }
++    }
++
++    Layout.preferredWidth: root.vertical ? 36 : 38
++    Layout.preferredHeight: root.vertical ? 84 : 36
++    Layout.fillWidth: vertical
++    Layout.fillHeight: !vertical
++
++    HoverHandler {
++        onHoveredChanged: root.isHovered = hovered
++    }
++
++    StyledRect {
++        id: buttonBg
++        variant: "bg"
++        anchors.fill: parent
++        enableShadow: root.layerEnabled
++
++        topLeftRadius: root.vertical ? root.startRadius : root.startRadius
++        topRightRadius: root.vertical ? root.startRadius : root.endRadius
++        bottomLeftRadius: root.vertical ? root.endRadius : root.startRadius
++        bottomRightRadius: root.vertical ? root.endRadius : root.endRadius
++
++        // Background highlight on hover — identical to RamIndicator.
++        Rectangle {
++            anchors.fill: parent
++            color: Styling.srItem("overprimary")
++            opacity: root.isHovered ? 0.25 : 0
++            radius: parent.radius ?? 0
++
++            Behavior on opacity {
++                enabled: Config.animDuration > 0
++                NumberAnimation {
++                    duration: Config.animDuration / 2
++                }
++            }
++        }
++
++        // Icon (optional) + vertical bar + numeric readout (optional),
++        // stacked top-to-bottom regardless of the parent bar's orientation.
++        RowLayout {
++            anchors.centerIn: parent
++            spacing: 4
++
++            Text {
++                Layout.alignment: Qt.AlignVCenter
++                visible: root.showIcon
++                text: root.iconText
++                font.family: Icons.font
++                font.pixelSize: 18
++                color: root.getTempColor(root.value)
++            }
++
++            ThermoBar {
++                Layout.alignment: Qt.AlignVCenter
++                percent: root.percent
++                barColor: root.getTempColor(root.value)
++                trackWidth: root.barWidth
++                trackHeight: root.barHeight
++            }
++
++            Text {
++                Layout.alignment: Qt.AlignHCenter
++                visible: root.showValueText
++                text: root.formatTemp(root.value)
++                font.pixelSize: 10
++                color: Colors.overBackground
++            }
++        }
++
++        MouseArea {
++            anchors.fill: parent
++            hoverEnabled: true
++            cursorShape: Qt.PointingHandCursor
++        }
++
++        StyledToolTip {
++            visible: root.isHovered
++            tooltipText: root.label + ": " + root.formatTemp(root.value)
++        }
++    }
++}
+diff --git a/modules/bar/WifiIndicator.qml b/modules/bar/WifiIndicator.qml
+new file mode 100644
+index 0000000..d9d1534
+--- /dev/null
++++ b/modules/bar/WifiIndicator.qml
+@@ -0,0 +1,103 @@
++import QtQuick
++import QtQuick.Controls
++import QtQuick.Layouts
++import qs.modules.theme
++import qs.modules.services
++import qs.modules.components
++import qs.config
++
++Button {
++    id: root
++
++    required property var bar
++    property bool layerEnabled: false
++    property real startRadius: 0
++    property real endRadius: 0
++
++    readonly property string orientation: bar && bar.orientation !== undefined ? bar.orientation : "horizontal"
++    readonly property bool vertical: orientation === "vertical"
++
++    implicitWidth: vertical ? 36 : (icon.implicitWidth + 24)
++    implicitHeight: vertical ? 36 : 36
++    Layout.preferredWidth: implicitWidth
++    Layout.preferredHeight: implicitHeight
++
++    // Mirrors NetworkService state
++    readonly property bool wifiOn: NetworkService.wifi && NetworkService.wifiEnabled
++    readonly property bool connected: NetworkService.wifiStatus === "connected" && NetworkService.active !== null
++    readonly property int strength: NetworkService.networkStrength
++    readonly property string iconGlyph: {
++        if (NetworkService.ethernet)
++            return Icons.ethernet !== undefined ? Icons.ethernet : Icons.wifiHigh;
++        if (!wifiOn)
++            return Icons.wifiOff;
++        if (!connected)
++            return Icons.wifiNone;
++        return NetworkService.wifiIconForStrength(strength);
++    }
++
++    background: StyledRect {
++        id: wifiBg
++        variant: "bg"
++        enableShadow: root.layerEnabled
++
++        property real startR: root.startRadius
++        property real endR: root.endRadius
++
++        // Vertical bars stack pills top->bottom; horizontal bars stack left->right
++        topLeftRadius: root.vertical ? startR : startR
++        topRightRadius: root.vertical ? startR : endR
++        bottomLeftRadius: root.vertical ? endR : startR
++        bottomRightRadius: root.vertical ? endR : endR
++
++        Rectangle {
++            anchors.fill: parent
++            radius: (parent.radius !== undefined ? parent.radius : 0)
++            color: Styling.srItem("overprimary")
++            opacity: root.pressed ? 0.5 : (root.hovered ? 0.25 : 0)
++
++            Behavior on opacity {
++                enabled: (Config.animDuration !== undefined ? Config.animDuration : 0) > 0
++                NumberAnimation {
++                    duration: (Config.animDuration !== undefined ? Config.animDuration : 0) / 2
++                }
++            }
++        }
++    }
++
++    contentItem: Text {
++        id: icon
++        text: root.iconGlyph
++        font.family: Icons.font
++        font.pixelSize: 18
++        color: root.pressed ? Colors.background : (Styling.srItem("overprimary") || Colors.foreground)
++        horizontalAlignment: Text.AlignHCenter
++        verticalAlignment: Text.AlignVCenter
++
++        Behavior on color {
++            enabled: (Config.animDuration !== undefined ? Config.animDuration : 0) > 0
++            ColorAnimation {
++                duration: (Config.animDuration !== undefined ? Config.animDuration : 0) / 2
++            }
++        }
++    }
++
++    onClicked: {
++        // Wire this to whatever opens your network/dashboard panel,
++        // e.g. Visibilities.toggleDashboardTab(bar.screen.name, "network")
++        NetworkService.rescanWifi();
++    }
++
++    StyledToolTip {
++        show: root.hovered
++        tooltipText: {
++            if (NetworkService.ethernet)
++                return "Ethernet connected";
++            if (!root.wifiOn)
++                return "Wi-Fi off";
++            if (!root.connected)
++                return "Not connected";
++            return NetworkService.networkName + " (" + root.strength + "%)";
++        }
++    }
++}
+diff --git a/modules/bar/clock/Clock.qml b/modules/bar/clock/Clock.qml
+index 1cad557..77421df 100644
+--- a/modules/bar/clock/Clock.qml
++++ b/modules/bar/clock/Clock.qml
+@@ -20,7 +20,7 @@ Item {
+     property bool vertical: bar.orientation === "vertical"
+     property bool isHovered: false
+     property bool layerEnabled: true
+-    
++
+     property real radius: 0
+     property real startRadius: radius
+     property real endRadius: radius
+@@ -74,11 +74,26 @@ Item {
+ 
+             Text {
+                 id: dayDisplay
+-                text: root.weatherAvailable ? WeatherService.weatherSymbol : root.currentDayAbbrev
++                text: root.currentDayAbbrev
++                color: root.popupOpen ? buttonBg.item : "#F2D230"
++                font.pixelSize: Config.theme.fontSize
++                font.family: Config.theme.font
++                font.bold: true
++            }
++
++            Separator {
++                id: daySeparator
++                vert: true
++                visible: root.weatherAvailable
++            }
++
++            Text {
++                id: weatherDisplay
++                visible: root.weatherAvailable
++                text: WeatherService.weatherSymbol
+                 color: root.popupOpen ? buttonBg.item : Colors.overBackground
+-                font.pixelSize: root.weatherAvailable ? 16 : Config.theme.fontSize
+-                font.family: root.weatherAvailable ? Config.theme.font : Config.theme.font
+-                font.bold: !root.weatherAvailable
++                font.pixelSize: 16
++                font.family: Config.theme.font
+             }
+ 
+             Separator {
+@@ -89,7 +104,7 @@ Item {
+             Text {
+                 id: timeDisplay
+                 text: root.currentTime
+-                color: root.popupOpen ? buttonBg.item : Colors.overBackground
++                color: root.popupOpen ? buttonBg.item : "#F2D230"
+                 font.pixelSize: Config.theme.fontSize
+                 font.family: Config.theme.font
+                 font.bold: true
+@@ -105,11 +120,30 @@ Item {
+ 
+             Text {
+                 id: dayDisplayV
+-                text: root.weatherAvailable ? WeatherService.weatherSymbol : root.currentDayAbbrev
++                text: root.currentDayAbbrev
++                color: root.popupOpen ? buttonBg.item : Colors.overBackground
++                font.pixelSize: Config.theme.fontSize
++                font.family: Config.theme.font
++                font.bold: true
++                horizontalAlignment: Text.AlignHCenter
++                wrapMode: Text.NoWrap
++                Layout.alignment: Qt.AlignHCenter
++            }
++
++            Separator {
++                id: weatherSeparatorV
++                vert: false
++                visible: root.weatherAvailable
++                Layout.alignment: Qt.AlignHCenter
++            }
++
++            Text {
++                id: weatherDisplayV
++                visible: root.weatherAvailable
++                text: WeatherService.weatherSymbol
+                 color: root.popupOpen ? buttonBg.item : Colors.overBackground
+-                font.pixelSize: root.weatherAvailable ? 16 : Config.theme.fontSize
++                font.pixelSize: 16
+                 font.family: Config.theme.font
+-                font.bold: !root.weatherAvailable
+                 horizontalAlignment: Text.AlignHCenter
+                 wrapMode: Text.NoWrap
+                 Layout.alignment: Qt.AlignHCenter
+diff --git a/modules/services/SystemResources.qml b/modules/services/SystemResources.qml
+index f14ab81..cb067f6 100644
+--- a/modules/services/SystemResources.qml
++++ b/modules/services/SystemResources.qml
+@@ -56,9 +56,15 @@ Singleton {
+ 
+     property int subscriptionHandle: -1
+ 
+-    // Subscription only lives while the dashboard Metrics tab is open,
+-    // preserving the original resource-saving behaviour (no dGPU polling).
+-    readonly property bool monitoringActive: GlobalStates.dashboardOpen && GlobalStates.dashboardCurrentTab === 2 && root.validDisks.length > 0
++    // Ref-count of bar widgets (RamIndicator, TemperatureIndicator, ...)
++    // currently on screen that need live polling. Widgets increment this in
++    // Component.onCompleted and decrement it in Component.onDestruction.
++    property int activeBarWidgets: 0
++
++    // Subscription lives while the dashboard Metrics tab is open, or while
++    // at least one bar widget that needs live data is on screen, preserving
++    // the original resource-saving behaviour (no dGPU polling) otherwise.
++    readonly property bool monitoringActive: (GlobalStates.dashboardOpen && GlobalStates.dashboardCurrentTab === 2 && root.validDisks.length > 0) || root.activeBarWidgets > 0
+ 
+     onMonitoringActiveChanged: {
+         if (monitoringActive) activateMonitor();
