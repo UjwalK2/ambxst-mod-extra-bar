@@ -8,7 +8,7 @@
   "license": "GPL-3.0-only",
   "author": "UjwalK2",
   "authorUrl": "https://github.com/UjwalK2",
-  "homepage": "https://github.com/UjwalK2/ambxst-mod-extra-bar",
+  "homepage": "https://github.com/UjwalK2/ambxst-mod-ram-battery-daybar",
   "compatibility": {
     "api": 1,
     "ambxst": ">=1.3.0",
