@@ -3,7 +3,7 @@
   "manifestVersion": 1,
   "id": "ujwalk2.ram-battery-daybar",
   "name": "RAM/CPU + Wi-Fi indicators and day-of-week clock",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Adds CPU/RAM ring meters and a Wi-Fi status button to the bar, gives the battery indicator a 3-stop red/orange/green colour ramp, and shows the day of the week next to the weather glyph in the clock. Includes an optional standalone thermometer-style TemperatureIndicator you can wire in yourself.",
   "license": "GPL-3.0-only",
   "author": "UjwalK2",
