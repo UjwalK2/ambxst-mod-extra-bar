@@ -16,7 +16,11 @@ revision recorded in that manifest.
   gradient.
 - **Day-of-week in the clock** — `Clock.qml` shows the day abbreviation
   (Mon, Tue, ...) as its own label, with the weather glyph next to it
-  instead of replacing it.
+  instead of replacing it. As of v1.1.0 this also repoints `updateDay()`
+  at the existing 3-letter `weather.day.*` translation keys instead of
+  the 2-letter `calendar.day.*` keys that Ambxst's native i18n merge
+  introduced, so the label reads "Mon" rather than "Mo" (see
+  "Why the day label uses `weather.day.*` keys" below).
 - **Optional: thermometer-style temperature gauge**
   (`modules/bar/TemperatureIndicator.qml`) is included but **not** wired
   into the bar by this patch, since the source `BarContent.qml` you sent
@@ -93,14 +97,37 @@ Swap in `value: SystemResources.gpuTemp` (and adjust `label`) for a GPU
 reading instead of CPU — see the comment block at the top of
 `TemperatureIndicator.qml` for the rest of the configurable properties.
 
+## Why the day label uses `weather.day.*` keys
+
+[#why-the-day-label-uses-weatherday-keys](#why-the-day-label-uses-weatherday-keys)
+
+Ambxst's `updateDay()` builds the bar's day-of-week label from an
+`I18n.t()` lookup over a `dayKeys` array. Since Ambxst absorbed
+`ambxst-mod-i18n` natively, that array points at `calendar.day.*`,
+which is a deliberately short, 2-letter form (`"calendar.day.mon": "Mo"`
+in `translations/en.json`) meant for tight calendar-grid cells. The bar
+isn't that tight, so this patch swaps `dayKeys` over to the
+`weather.day.*` keys the weather popup already uses for its forecast
+strip — those are 3 letters in every shipped locale (`"weather.day.mon":
+"Mon"`, `"Lun"`, etc.), except Russian, where 2 letters (`"Пн"`) is
+already the correct native abbreviation in both key sets, so nothing
+changes there. No new translation strings are added; this just points
+at ones that already exist.
+
 ## Compatibility
 
-Tested against Ambxst commit `d6a3b7207bdc9591d545ee6cac785446279a5a72`
-(post-1.3.0, native mod manager). If your installed Ambxst has drifted
+Tested against Ambxst commit `2a704c438ddc0b94a11f4e4cf32a16220b62141f`
+(post-1.3.0, native mod manager, includes the native-i18n merge that the
+day-label fix above depends on). If your installed Ambxst has drifted
 far from that revision, the mod manager's compatibility check may flag it
 — use `ambxst mods bypass on` to force it through if you've confirmed the
 patch still applies, or update `compatibility.testedBaseCommits`
-yourself after re-generating the patch against your current tree.
+yourself after re-generating the patch against your current tree. If
+you're on an older Ambxst that predates the native-i18n merge (before
+`calendar.day.*`/`weather.day.*` existed), the old `d6a3b7207` revision
+of this mod already gives you a 3-letter day label via a different
+mechanism (`Qt.formatDateTime(..., "ddd")`), so you don't need this
+patch hunk at all in that case.
 
 ## License
 
