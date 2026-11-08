@@ -1,9 +1,9 @@
 {
-  "$schema": "https://raw.githubusercontent.com/Axenide/Ambxst/dev/docs/mods/manifest.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Axenide/Ambxst/main/docs/mods/manifest.schema.json",
   "manifestVersion": 1,
   "id": "ujwalk2.ram-battery-daybar",
   "name": "RAM/CPU + Wi-Fi indicators and day-of-week clock",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Adds CPU/RAM ring meters and a Wi-Fi status button to the bar, gives the battery indicator a 3-stop red/orange/green colour ramp, and shows the day of the week next to the weather glyph in the clock. Includes an optional standalone thermometer-style TemperatureIndicator you can wire in yourself.",
   "license": "GPL-3.0-only",
   "author": "UjwalK2",
@@ -11,8 +11,9 @@
   "homepage": "https://github.com/UjwalK2/ambxst-mod-extra-bar",
   "compatibility": {
     "api": 1,
-    "ambxst": ">=1.3.0",
+    "ambxst": ">=1.3.6",
     "testedBaseCommits": [
+      "83e8462a6b03d4a7d428d5c7365e4ec03f3b63a9",
       "2a704c438ddc0b94a11f4e4cf32a16220b62141f"
     ]
   },
