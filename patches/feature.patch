@@ -671,10 +671,10 @@ index 0000000..d9d1534
 +    }
 +}
 diff --git a/modules/bar/clock/Clock.qml b/modules/bar/clock/Clock.qml
-index 1cad557..77421df 100644
+index 9930468..75b3224 100644
 --- a/modules/bar/clock/Clock.qml
 +++ b/modules/bar/clock/Clock.qml
-@@ -20,7 +20,7 @@ Item {
+@@ -20,7 +20,7 @@
      property bool vertical: bar.orientation === "vertical"
      property bool isHovered: false
      property bool layerEnabled: true
@@ -683,7 +683,7 @@ index 1cad557..77421df 100644
      property real radius: 0
      property real startRadius: radius
      property real endRadius: radius
-@@ -74,11 +74,26 @@ Item {
+@@ -74,11 +74,26 @@
  
              Text {
                  id: dayDisplay
@@ -714,7 +714,7 @@ index 1cad557..77421df 100644
              }
  
              Separator {
-@@ -89,7 +104,7 @@ Item {
+@@ -89,7 +104,7 @@
              Text {
                  id: timeDisplay
                  text: root.currentTime
@@ -723,7 +723,7 @@ index 1cad557..77421df 100644
                  font.pixelSize: Config.theme.fontSize
                  font.family: Config.theme.font
                  font.bold: true
-@@ -105,11 +120,30 @@ Item {
+@@ -105,11 +120,30 @@
  
              Text {
                  id: dayDisplayV
@@ -757,6 +757,23 @@ index 1cad557..77421df 100644
                  horizontalAlignment: Text.AlignHCenter
                  wrapMode: Text.NoWrap
                  Layout.alignment: Qt.AlignHCenter
+@@ -640,10 +674,13 @@
+ 
+     function updateDay() {
+         var now = new Date();
++        // Use the 3-letter weather.day.* abbreviations instead of the
++        // 2-letter calendar.day.* ones so the bar's day-of-week label
++        // reads "Mon" rather than "Mo".
+         var dayKeys = [
+-            "calendar.day.sun", "calendar.day.mon", "calendar.day.tue",
+-            "calendar.day.wed", "calendar.day.thu", "calendar.day.fri",
+-            "calendar.day.sat"
++            "weather.day.sun", "weather.day.mon", "weather.day.tue",
++            "weather.day.wed", "weather.day.thu", "weather.day.fri",
++            "weather.day.sat"
+         ];
+         var dayFullKeys = [
+             "calendar.day_full.sunday", "calendar.day_full.monday",
 diff --git a/modules/services/SystemResources.qml b/modules/services/SystemResources.qml
 index f14ab81..cb067f6 100644
 --- a/modules/services/SystemResources.qml
